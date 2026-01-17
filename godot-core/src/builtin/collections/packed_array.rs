@@ -13,7 +13,7 @@ use std::iter::FromIterator;
 use std::{fmt, ops, ptr};
 
 use godot_ffi as sys;
-use sys::{ExtVariantType, GodotFfi, SysPtr, ffi_methods};
+use sys::{ffi_methods, ExtVariantType, GodotFfi, SysPtr};
 
 use crate::builtin::collections::extend_buffer::ExtendBufferTrait;
 use crate::builtin::*;
@@ -45,7 +45,8 @@ pub type PackedFloat64Array = PackedArray<f64>;
 pub type PackedStringArray = PackedArray<GString>;
 pub type PackedVector2Array = PackedArray<Vector2>;
 pub type PackedVector3Array = PackedArray<Vector3>;
-#[cfg(since_api = "4.3")] #[cfg_attr(published_docs, doc(cfg(since_api = "4.3")))]
+#[cfg(since_api = "4.3")]
+#[cfg_attr(published_docs, doc(cfg(since_api = "4.3")))]
 pub type PackedVector4Array = PackedArray<Vector4>;
 pub type PackedColorArray = PackedArray<Color>;
 
@@ -507,6 +508,12 @@ unsafe impl<T: PackedElement> GodotFfi for PackedArray<T> {
     ffi_methods! { type sys::GDExtensionTypePtr = *mut Opaque; .. }
 }
 
+impl<T: PackedElement> AsRef<[T]> for PackedArray<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
 // Generic trait implementations for PackedArray<T>
 impl<T: PackedElement> GodotConvert for PackedArray<T> {
     type Via = Self;
@@ -889,7 +896,8 @@ impl_to_byte_array!(PackedFloat64Array);
 impl_to_byte_array!(PackedStringArray);
 impl_to_byte_array!(PackedVector2Array);
 impl_to_byte_array!(PackedVector3Array);
-#[cfg(since_api = "4.3")] #[cfg_attr(published_docs, doc(cfg(since_api = "4.3")))]
+#[cfg(since_api = "4.3")]
+#[cfg_attr(published_docs, doc(cfg(since_api = "4.3")))]
 impl_to_byte_array!(PackedVector4Array);
 impl_to_byte_array!(PackedColorArray);
 
@@ -1080,5 +1088,9 @@ impl PackedByteArray {
 }
 
 fn populated_or_err(array: PackedByteArray) -> Result<PackedByteArray, ()> {
-    if array.is_empty() { Err(()) } else { Ok(array) }
+    if array.is_empty() {
+        Err(())
+    } else {
+        Ok(array)
+    }
 }
