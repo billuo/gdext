@@ -502,6 +502,12 @@ unsafe impl<T: PackedArrayElement> GodotFfi for PackedArray<T> {
     ffi_methods! { type sys::GDExtensionTypePtr = *mut Opaque; .. }
 }
 
+impl<T: PackedArrayElement> AsRef<[T]> for PackedArray<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
 // Generic trait implementations for PackedArray<T>
 impl<T: PackedArrayElement> GodotConvert for PackedArray<T> {
     type Via = Self;
