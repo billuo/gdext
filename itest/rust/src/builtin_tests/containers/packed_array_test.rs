@@ -532,6 +532,20 @@ fn packed_array_as_mut_slice() {
     assert_eq!(empty.as_mut_slice(), &mut [] as &mut [GString]);
 }
 
+#[itest]
+fn packed_array_as_ref() {
+    fn test<T: Generator>() {
+        let array = T::packed_n(3);
+
+        // `AsRef<[T]>` borrows the same storage as `as_slice()`.
+        let slice: &[T] = array.as_ref();
+        assert_eq!(slice, array.as_slice());
+        assert_eq!(slice, &T::vec_n(3)[..]);
+    }
+
+    test!(u8, i32, GString, Color);
+}
+
 // ----------------------------------------------------------------------------------------------------------------------------------------------
 // Search tests
 

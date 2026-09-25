@@ -600,6 +600,15 @@ impl<T: PackedElement> Export for PackedArray<T> {}
 // ----------------------------------------------------------------------------------------------------------------------------------------------
 // Conversion trait impls
 
+/// Borrows the array's elements as a Rust slice, without copying.
+///
+/// Equivalent to [`as_slice()`][Self::as_slice].
+impl<T: PackedElement> AsRef<[T]> for PackedArray<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
 /// Creates a `PackedArray<T>` from the given Rust slice.
 impl<T: PackedElement> From<&[T]> for PackedArray<T> {
     fn from(slice: &[T]) -> Self {
