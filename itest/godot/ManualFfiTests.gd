@@ -23,6 +23,30 @@ func test_init_defaults():
 	assert_eq(obj.literal_int, 42)
 	assert_eq(obj.expr_int, -42)
 
+func test_func_varargs():
+	var obj = FuncObj.new()
+
+	# GDScript statically recognizes the vararg method, so any number of trailing arguments is allowed.
+	assert_eq(obj.sum_varargs(1, 2, 3, 4), 10)
+	assert_eq(obj.sum_varargs(5), 5)
+
+	# Heterogeneous varargs.
+	var collected: Array = obj.collect_varargs(1, "two", 3.5)
+	assert_eq(collected, [1, "two", 3.5])
+
+	# Zero varargs.
+	assert_eq(obj.collect_varargs(), [])
+
+	# Static vararg method.
+	assert_eq(FuncObj.static_sum_varargs(10, 1, 2), 13)
+
+	# The method is registered with the vararg flag (METHOD_FLAG_VARARG == 16).
+	for method in obj.get_method_list():
+		if method.name == "sum_varargs":
+			assert_that(method.flags & 16 != 0, "sum_varargs should be registered as vararg")
+			return
+	assert_fail("sum_varargs should be present in get_method_list()")
+
 func test_to_string():
 	var ffi = VirtualMethodTest.new()
 	

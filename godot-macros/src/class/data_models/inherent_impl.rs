@@ -318,11 +318,41 @@ fn process_godot_fns(
                 )?;
 
                 // Clone might not strictly be necessary, but the 2 other callers of into_signature_info() are better off with pass-by-value.
-                let mut signature_info =
-                    into_signature_info(signature.clone(), class_name, gd_self_parameter.is_some());
+                let mut signature_info = into_signature_info(
+                    signature.clone(),
+                    class_name,
+                    gd_self_parameter.is_some(),
+                )?;
 
                 // Default value expressions from `#[opt(default = EXPR)]`; None for required parameters.
                 let all_param_maybe_defaults = parse_default_expressions(&mut function.params)?;
+
+                if let Some(varargs_ident) = signature_info.varargs_ident.as_ref() {
+                    // Varargs absorb all trailing arguments, so they cannot be combined with default values (which would be unreachable).
+                    if all_param_maybe_defaults.iter().any(Option::is_some) {
+                        return bail!(
+                            varargs_ident,
+                            "a `Varargs` parameter cannot be combined with `#[opt]` default parameters",
+                        );
+                    }
+
+                    // Virtual dispatch does not support variable-length arguments.
+                    if func.is_virtual {
+                        return bail!(
+                            varargs_ident,
+                            "a `Varargs` parameter is not supported for `#[func(virtual)]`",
+                        );
+                    }
+
+                    // RPCs require a fixed, statically-known signature.
+                    if rpc_info.is_some() {
+                        return bail!(
+                            varargs_ident,
+                            "a `Varargs` parameter is not supported for `#[rpc]` functions",
+                        );
+                    }
+                }
+
                 signature_info.optional_param_default_exprs =
                     validate_default_exprs(all_param_maybe_defaults, &signature_info.param_idents)?;
 

@@ -10,7 +10,7 @@ use std::ffi::c_void;
 use godot_ffi as sys;
 use sys::interface_fn;
 
-use crate::builtin::{StringName, Variant};
+use crate::builtin::{StringName, Varargs, Variant};
 use crate::meta::private_reexport::{CallContext, Signature};
 use crate::meta::{ClassId, EngineToGodot, GodotConvert, InParamTuple, sig_params};
 use crate::registry::info::{MethodFlags, PropertyInfo};
@@ -109,6 +109,38 @@ impl ClassMethodInfo {
                 method_flags,
                 param_names,
                 MethodUserdata::<Params, Ret>::VTABLE,
+                method_userdata,
+            )
+        }
+    }
+
+    /// Builds the method info for a vararg `#[func]` from `method_data`, whose allocation is owned by the class's registry entry and passed to
+    /// Godot as `method_userdata`. Vararg methods only register a varcall callback (no ptrcall path).
+    ///
+    /// # Safety
+    /// `method_data`'s function must interpret its instance pointer as an instance of `class_id`, and `method_flags` must match
+    /// the receiver (e.g. [`MethodFlags::STATIC`] only for functions ignoring the instance pointer).
+    pub unsafe fn from_vararg_signature<Params, Ret>(
+        class_id: ClassId,
+        method_name: StringName,
+        method_flags: MethodFlags,
+        param_names: &[&str],
+        method_data: VarargMethodUserdata<Params, Ret>,
+    ) -> Self
+    where
+        Params: InParamTuple + 'static,
+        Ret: EngineToGodot + 'static,
+    {
+        let method_userdata = method_data.into_raw();
+
+        // SAFETY: method_userdata comes from VarargMethodUserdata::<Params, Ret>::into_raw(), so it matches VTABLE and is not aliased.
+        unsafe {
+            Self::from_erased(
+                class_id,
+                method_name,
+                method_flags,
+                param_names,
+                VarargMethodUserdata::<Params, Ret>::VTABLE,
                 method_userdata,
             )
         }
@@ -361,6 +393,61 @@ impl<Params: InParamTuple, Ret: EngineToGodot> MethodUserdata<Params, Ret> {
     };
 }
 
+/// Everything the FFI callbacks need to invoke one vararg `#[func]`, passed to Godot as its `method_userdata`.
+///
+/// Like [`MethodUserdata`], but the forwarding function additionally receives the collected trailing arguments as a [`Varargs`]. Vararg
+/// methods have no default arguments (they are rejected at macro expansion) and no ptrcall path.
+#[repr(C)]
+pub struct VarargMethodUserdata<Params, Ret> {
+    header: MethodHeader,
+    func: fn(sys::GDExtensionClassInstancePtr, Params, Varargs) -> Ret,
+}
+
+impl<Params, Ret> VarargMethodUserdata<Params, Ret> {
+    /// # Safety
+    /// `func` must treat its instance pointer as an instance of the class the method is registered for.
+    pub unsafe fn new(
+        class_name: &'static str,
+        method_name: &'static str,
+        func: fn(sys::GDExtensionClassInstancePtr, Params, Varargs) -> Ret,
+    ) -> Self {
+        Self {
+            header: MethodHeader {
+                class_name,
+                method_name,
+                default_arguments: MethodDefaults(Vec::new()),
+            },
+            func,
+        }
+    }
+
+    /// Moves `self` to the heap, returning the pointer passed to Godot as `method_userdata` and reclaimed via [`Self::drop_raw()`].
+    fn into_raw(self) -> *mut c_void {
+        Box::into_raw(Box::new(self)).cast::<c_void>()
+    }
+
+    /// Reconstructs the `VarargMethodUserdata` box and drops it. Instantiated once per `(Params, Ret)` pair, not per `#[func]`.
+    ///
+    /// # Safety
+    /// `ptr` must come from [`Self::into_raw()`] and be no longer aliased.
+    unsafe fn drop_raw(ptr: *mut c_void) {
+        let method_userdata_ptr = ptr.cast::<Self>();
+
+        // SAFETY: guaranteed by the caller.
+        drop(unsafe { Box::from_raw(method_userdata_ptr) });
+    }
+}
+
+impl<Params: InParamTuple, Ret: EngineToGodot> VarargMethodUserdata<Params, Ret> {
+    const VTABLE: &'static MethodVTable = &MethodVTable {
+        call_func: Some(varcall_varargs_callback::<Params, Ret>),
+        ptrcall_func: None,
+        drop_fn: Self::drop_raw,
+        param_info_fn: sig_params::<Params>,
+        return_info_fn: MethodParamOrReturnInfo::for_return::<Ret>,
+    };
+}
+
 fn default_argument_ptrs(defaults: &[Variant]) -> Vec<sys::GDExtensionVariantPtr> {
     defaults
         .iter()
@@ -436,6 +523,46 @@ unsafe extern "C" fn varcall_callback<Params: InParamTuple, Ret: EngineToGodot>(
                 args_ptr,
                 arg_count,
                 &data.header.default_arguments,
+                ret,
+                err,
+                data.func,
+            )
+        }
+    };
+
+    // SAFETY: `err` points to a live call error, as guaranteed by the caller.
+    unsafe { crate::private::handle_fallible_varcall(&call_ctx, err, code) };
+}
+
+/// Varcall FFI entry point shared by all vararg `#[func]`s with signature `(Params, Ret)`.
+///
+/// Collects the trailing arguments into a [`Varargs`] and forwards them to the Rust function. Registered only for vararg `#[func]`s,
+/// which have no ptrcall path (see [`ClassMethodInfo::from_vararg_signature()`]).
+///
+/// # Safety
+/// `method_data` must point to a `VarargMethodUserdata<Params, Ret>` stored by [`ClassMethodInfo::from_vararg_signature()`]; the remaining
+/// parameters must follow the varcall convention for that signature.
+unsafe extern "C" fn varcall_varargs_callback<Params: InParamTuple, Ret: EngineToGodot>(
+    method_data: *mut c_void,
+    instance_ptr: sys::GDExtensionClassInstancePtr,
+    args_ptr: *const sys::GDExtensionConstVariantPtr,
+    arg_count: sys::GDExtensionInt,
+    ret: sys::GDExtensionVariantPtr,
+    err: *mut sys::GDExtensionCallError,
+) {
+    // SAFETY: `method_data` is the pointer registered together with this function, and the data behind it is never mutated, nor freed while
+    // the method stays registered.
+    let data = unsafe { &*method_data.cast::<VarargMethodUserdata<Params, Ret>>() };
+    let call_ctx = CallContext::func(data.header.class_name, data.header.method_name);
+
+    let code = || {
+        // SAFETY: guaranteed by this function's caller.
+        unsafe {
+            Signature::<Params, Ret>::in_varcall_varargs(
+                instance_ptr,
+                &call_ctx,
+                args_ptr,
+                arg_count,
                 ret,
                 err,
                 data.func,

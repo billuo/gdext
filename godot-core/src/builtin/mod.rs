@@ -46,6 +46,7 @@ pub mod __prelude_reexport {
     pub use rid::*;
     pub use signal::*;
     pub use strings::{Encoding, GString, GodotStringExt, NodePath, StringName};
+    pub use varargs::*;
     pub use variant::*;
     pub use vectors::*;
 
@@ -108,6 +109,7 @@ mod rect2i;
 mod rid;
 mod signal;
 mod strings;
+mod varargs;
 mod variant;
 mod vectors;
 

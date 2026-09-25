@@ -462,7 +462,7 @@ impl<'a> InterfaceBuilder<'a> {
             format!("_{method_name}")
         };
 
-        let signature_info = into_signature_info(method, self.class_name, has_gd_self);
+        let signature_info = into_signature_info(method, self.class_name, has_gd_self)?;
 
         let mut updated_function = None;
         // If there was a signature change (e.g. f32 -> f64 in process/physics_process), apply to new function tokens.

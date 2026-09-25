@@ -138,6 +138,19 @@ impl CallError {
         Err(call_error)
     }
 
+    /// Checks whether the number of arguments is at least the number of required parameters (used by vararg `#[func]` methods).
+    pub(crate) fn check_vararg_arg_count(
+        call_ctx: &CallContext,
+        arg_count: usize,   // Arguments passed by the caller.
+        param_count: usize, // Required (non-vararg) parameters declared by the function.
+    ) -> Result<(), Self> {
+        if arg_count >= param_count {
+            return Ok(());
+        }
+
+        Err(Self::failed_param_count(call_ctx, arg_count, param_count))
+    }
+
     /// Checks the Godot side of a varcall (low-level `sys::GDExtensionCallError`).
     pub(crate) fn check_out_varcall(
         call_ctx: &CallContext,

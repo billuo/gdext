@@ -74,6 +74,29 @@ impl FuncObj {
         arr
     }
 
+    #[func]
+    fn sum_varargs(&self, prefix: i64, args: Varargs) -> i64 {
+        let mut sum = prefix;
+        for arg in args.iter() {
+            sum += arg.to::<i64>();
+        }
+        sum
+    }
+
+    #[func]
+    fn collect_varargs(&self, args: Varargs) -> VarArray {
+        args.to_var_array()
+    }
+
+    #[func]
+    fn static_sum_varargs(prefix: i64, args: Varargs) -> i64 {
+        let mut sum = prefix;
+        for arg in args.iter() {
+            sum += arg.to::<i64>();
+        }
+        sum
+    }
+
     /* For now, Gd<T> types cannot be used as default parameters due to immutability requirement.
     #[func]
     fn static_with_defaults(
@@ -415,6 +438,29 @@ fn func_immutable_defaults() {
         arr.is_read_only(),
         "GodotImmutable trait did its job to make array read-only"
     );
+}
+
+#[itest]
+fn func_varargs() {
+    let mut obj = FuncObj::new_gd();
+
+    // Typed parameter followed by varargs.
+    let sum = obj.call("sum_varargs", vslice![1, 2, 3, 4]).to::<i64>();
+    assert_eq!(sum, 10);
+
+    // Only the typed parameter, no varargs.
+    let sum_no_varargs = obj.call("sum_varargs", vslice![5]).to::<i64>();
+    assert_eq!(sum_no_varargs, 5);
+
+    // Pure vararg method, heterogeneous arguments.
+    let collected = obj
+        .call("collect_varargs", vslice![1, "two", 3.5])
+        .to::<VarArray>();
+    assert_eq!(collected, varray![1, "two", 3.5]);
+
+    // Zero arguments.
+    let empty = obj.call("collect_varargs", &[]).to::<VarArray>();
+    assert!(empty.is_empty());
 }
 
 #[itest]
