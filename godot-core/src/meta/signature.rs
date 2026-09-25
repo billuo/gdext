@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use godot_ffi as sys;
 use sys::GodotFfi;
 
-use crate::builtin::{Varargs, Variant};
+use crate::builtin::Variant;
 use crate::meta::error::{CallError, CallResult, ConvertError, ErrorToGodot};
 use crate::meta::param_tuple::TupleFromGodot;
 use crate::meta::{
@@ -117,7 +117,10 @@ where
         Ok(())
     }
 
-    /// Receive a varcall from Godot, where the method additionally collects trailing varargs into a [`Varargs`].
+    /// Receive a varcall from Godot, where the method additionally collects trailing varargs.
+    ///
+    /// The trailing arguments are passed to `func` as a raw pointer/length pair (see `Varargs::from_raw_parts()`), so that the varargs
+    /// can be borrowed without allocation. `func` is responsible for reconstructing a `Varargs` from them.
     ///
     /// # Safety
     /// A call to this function must be caused by Godot making a varcall with at least `Params::LEN` arguments, and return type `Ret`.
@@ -130,7 +133,12 @@ where
         arg_count: i64,
         ret: sys::GDExtensionVariantPtr,
         err: *mut sys::GDExtensionCallError,
-        func: unsafe fn(sys::GDExtensionClassInstancePtr, Params, Varargs) -> Ret,
+        func: unsafe fn(
+            sys::GDExtensionClassInstancePtr,
+            Params,
+            *const sys::GDExtensionConstVariantPtr,
+            usize,
+        ) -> Ret,
     ) -> CallResult<()> {
         let arg_count = arg_count as usize;
         CallError::check_vararg_arg_count(call_ctx, arg_count, Params::LEN)?;
@@ -142,13 +150,17 @@ where
         // SAFETY: `args_ptr` holds at least `Params::LEN` valid variant pointers, checked above.
         let args = unsafe { Params::from_varcall_args(args_ptr, Params::LEN, &[], call_ctx)? };
 
-        // Collect the remaining arguments into an owned `Varargs`.
+        // Pass the remaining arguments through as a raw pointer/length pair, without collecting them.
         // SAFETY: `args_ptr` holds `arg_count` valid variant pointers, and `Params::LEN <= arg_count`.
-        let varargs = unsafe {
-            Varargs::from_var_arg_slice(args_ptr.add(Params::LEN), arg_count - Params::LEN)
+        let rust_result = unsafe {
+            func(
+                instance_ptr,
+                args,
+                args_ptr.add(Params::LEN),
+                arg_count - Params::LEN,
+            )
         };
 
-        let rust_result = unsafe { func(instance_ptr, args, varargs) };
         // SAFETY: TODO.
         unsafe { varcall_return::<Ret>(rust_result, ret, err, call_ctx)? };
         Ok(())

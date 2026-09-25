@@ -10,7 +10,7 @@ use std::ffi::c_void;
 use godot_ffi as sys;
 use sys::interface_fn;
 
-use crate::builtin::{StringName, Varargs, Variant};
+use crate::builtin::{StringName, Variant};
 use crate::meta::private_reexport::{CallContext, Signature};
 use crate::meta::{ClassId, EngineToGodot, GodotConvert, InParamTuple, sig_params};
 use crate::registry::info::{MethodFlags, PropertyInfo};
@@ -395,21 +395,32 @@ impl<Params: InParamTuple, Ret: EngineToGodot> MethodUserdata<Params, Ret> {
 
 /// Everything the FFI callbacks need to invoke one vararg `#[func]`, passed to Godot as its `method_userdata`.
 ///
-/// Like [`MethodUserdata`], but the forwarding function additionally receives the collected trailing arguments as a [`Varargs`]. Vararg
-/// methods have no default arguments (they are rejected at macro expansion) and no ptrcall path.
+/// Like [`MethodUserdata`], but the forwarding function additionally receives the trailing arguments as a raw pointer/length pair, so they
+/// can be borrowed without allocation. Vararg methods have no default arguments (they are rejected at macro expansion) and no ptrcall path.
 #[repr(C)]
 pub struct VarargMethodUserdata<Params, Ret> {
     header: MethodHeader,
-    func: fn(sys::GDExtensionClassInstancePtr, Params, Varargs) -> Ret,
+    func: fn(
+        sys::GDExtensionClassInstancePtr,
+        Params,
+        *const sys::GDExtensionConstVariantPtr,
+        usize,
+    ) -> Ret,
 }
 
 impl<Params, Ret> VarargMethodUserdata<Params, Ret> {
     /// # Safety
-    /// `func` must treat its instance pointer as an instance of the class the method is registered for.
+    /// `func` must treat its instance pointer as an instance of the class the method is registered for, and reconstruct a `Varargs` from
+    /// the trailing raw pointer/length pair.
     pub unsafe fn new(
         class_name: &'static str,
         method_name: &'static str,
-        func: fn(sys::GDExtensionClassInstancePtr, Params, Varargs) -> Ret,
+        func: fn(
+            sys::GDExtensionClassInstancePtr,
+            Params,
+            *const sys::GDExtensionConstVariantPtr,
+            usize,
+        ) -> Ret,
     ) -> Self {
         Self {
             header: MethodHeader {
@@ -536,8 +547,8 @@ unsafe extern "C" fn varcall_callback<Params: InParamTuple, Ret: EngineToGodot>(
 
 /// Varcall FFI entry point shared by all vararg `#[func]`s with signature `(Params, Ret)`.
 ///
-/// Collects the trailing arguments into a [`Varargs`] and forwards them to the Rust function. Registered only for vararg `#[func]`s,
-/// which have no ptrcall path (see [`ClassMethodInfo::from_vararg_signature()`]).
+/// Passes the trailing arguments through to the Rust function as a raw pointer/length pair, which reconstructs a `Varargs` to borrow them
+/// without allocation. Registered only for vararg `#[func]`s, which have no ptrcall path (see [`ClassMethodInfo::from_vararg_signature()`]).
 ///
 /// # Safety
 /// `method_data` must point to a `VarargMethodUserdata<Params, Ret>` stored by [`ClassMethodInfo::from_vararg_signature()`]; the remaining

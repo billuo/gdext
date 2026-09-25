@@ -388,10 +388,22 @@ fn make_forwarding_closure(
         None => quote! { #(#params),* },
     };
 
-    // The closure's trailing parameters (after the receiver): the typed-params tuple, plus the vararg parameter (if any).
-    let trailing_closure_params = match varargs_ident {
-        Some(va) => quote! { , #param_ident, #va },
-        None => quote! { , #param_ident },
+    // The closure's trailing parameters (after the receiver), plus the statement that reconstructs a borrowed `Varargs` from them.
+    //
+    // Varargs cross the FFI boundary as a raw pointer/length pair (`*const Variant, usize`), which the closure turns into a borrowed
+    // `Varargs` without allocating.
+    let (trailing_closure_params, varargs_decl) = match varargs_ident {
+        Some(va) => {
+            let varargs_ptr = Ident::new("__varargs_ptr", signature_info.params_span);
+            let varargs_len = Ident::new("__varargs_len", signature_info.params_span);
+            (
+                quote! { , #param_ident, #varargs_ptr, #varargs_len },
+                quote! {
+                    let #va = unsafe { ::godot::builtin::Varargs::from_raw_parts(#varargs_ptr, #varargs_len) };
+                },
+            )
+        }
+        None => (quote! { , #param_ident }, TokenStream::new()),
     };
 
     let instance_decl = match &signature_info.receiver_type {
@@ -465,6 +477,7 @@ fn make_forwarding_closure(
 
                     #instance_decl
                     #before_method_call
+                    #varargs_decl
                     #method_call
                 }
             }
@@ -490,6 +503,7 @@ fn make_forwarding_closure(
                         unsafe { ::godot::private::as_storage::<#class_name>(instance_ptr) };
 
                     #before_method_call
+                    #varargs_decl
                     #class_name::#method_name(::godot::private::Storage::get_gd(&*storage), #forward_args)
                 }
             }
@@ -502,6 +516,7 @@ fn make_forwarding_closure(
             quote! {
                 |_ #trailing_closure_params| {
                     let #params_tuple = #param_ident;
+                    #varargs_decl
                     #class_name::#method_name(#forward_args)
                 }
             }
