@@ -157,8 +157,18 @@ fn make_opaque_type(godot_original_name: &str, size: usize) -> TokenStream {
 
     // Capitalize: "int" -> "Int".
     let ident = format_ident!("Opaque{}{}", first.to_ascii_uppercase(), rest);
+
+    // `Variant` needs a dedicated carrier: its C++ definition is 8-aligned on all platforms (union with `double`/`int64_t`), while the
+    // default `Opaque` follows the target's pointer alignment (4 on 32-bit). godot-core overlays `Variant` memory directly (`RustVariant`),
+    // so the declared alignment must match C++, otherwise layout assertions fail and reference transmutes are unsound on 32-bit targets.
+    let carrier = if godot_original_name == "Variant" {
+        quote! { crate::opaque::AlignedOpaque<#size> }
+    } else {
+        quote! { crate::opaque::Opaque<#size> }
+    };
+
     quote! {
-        pub type #ident = crate::opaque::Opaque<#size>;
+        pub type #ident = #carrier;
     }
 }
 
