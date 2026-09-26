@@ -26,3 +26,15 @@ pub struct Opaque<const N: usize> {
     storage: [u8; N],
     marker: std::marker::PhantomData<*const u8>, // disable Send/Sync
 }
+
+/// Like [`Opaque`], but always 8-aligned, independent of the target's pointer width.
+///
+/// For types whose C++ definition requires 8-byte alignment on all platforms. Godot's `Variant` embeds a union with `double` and `int64_t`
+/// members, giving it an alignment of 8 even on 32-bit platforms. godot-core overlays that memory directly in pure Rust (`RustVariant`
+/// view, borrowed `&[Variant]` slices), so the declared Rust alignment must match C++, not the [`Opaque`] pointer-width default.
+#[repr(C, align(8))]
+#[derive(Copy, Clone)]
+pub struct AlignedOpaque<const N: usize> {
+    storage: [u8; N],
+    marker: std::marker::PhantomData<*const u8>, // disable Send/Sync
+}
