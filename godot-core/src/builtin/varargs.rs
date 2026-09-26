@@ -89,6 +89,15 @@ impl<'a> Varargs<'a> {
     }
 }
 
+impl<'a> IntoIterator for Varargs<'a> {
+    type Item = &'a Variant;
+    type IntoIter = VarargsIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl<'a> IntoIterator for &Varargs<'a> {
     type Item = &'a Variant;
     type IntoIter = VarargsIter<'a>;
@@ -124,8 +133,19 @@ impl<'a> Iterator for VarargsIter<'a> {
     }
 }
 
+impl DoubleEndedIterator for VarargsIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|ptr| {
+            // SAFETY: each pointer points to a live `Variant` for the lifetime `'a` (see `Varargs::from_raw_parts`).
+            unsafe { Variant::borrow_var_sys(*ptr) }
+        })
+    }
+}
+
 impl ExactSizeIterator for VarargsIter<'_> {
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
+
+impl std::iter::FusedIterator for VarargsIter<'_> {}

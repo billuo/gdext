@@ -588,6 +588,15 @@ pub(crate) fn into_signature_info(
             venial::FnParam::Typed(arg) => {
                 // A `Varargs` parameter collects trailing arguments; it is excluded from the typed parameter list and forwarded separately.
                 if is_varargs_type(&arg.ty) {
+                    // Without this check, the first `Varargs` parameter would be silently dropped from the forwarding call, resulting in a
+                    // confusing "missing argument" error in generated code.
+                    if varargs_ident.is_some() {
+                        return bail!(
+                            &arg.name,
+                            "a function can have at most one `Varargs` parameter",
+                        );
+                    }
+
                     varargs_ident = Some(maybe_rename_parameter(arg.name, &mut next_unnamed_index));
                     varargs_position = Some(index);
                     continue;
