@@ -138,13 +138,15 @@ impl CallError {
         Err(call_error)
     }
 
-    /// Checks whether the number of arguments is at least the number of required parameters by a vararg function.
+    /// Checks whether the number of arguments is at least the number of declared parameters that are not covered by default values
+    /// (used by vararg `#[func]` methods, which additionally accept any number of trailing arguments).
     pub(crate) fn check_vararg_arg_count(
         call_ctx: &CallContext,
-        arg_count: usize,   // Arguments passed by the caller.
-        param_count: usize, // Parameters declared by the function (excluding the vararg).
+        arg_count: usize,           // Arguments passed by the caller.
+        default_value_count: usize, // Fallback/default values, *not* arguments.
+        param_count: usize,         // Parameters declared by the function (excluding the vararg).
     ) -> Result<(), Self> {
-        if arg_count >= param_count {
+        if arg_count + default_value_count >= param_count {
             return Ok(());
         }
 

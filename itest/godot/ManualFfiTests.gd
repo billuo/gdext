@@ -46,6 +46,18 @@ func test_func_varargs():
 	assert_eq(FuncObj.static_sum_varargs0(10), 10)
 	assert_eq(FuncObj.static_sum_varargs1(10), 10)
 
+	# Default value on a parameter before the varargs: it fills the declared parameter, never the trailing arguments.
+	assert_eq(obj.sum_varargs_default_prefix(), 100)
+	assert_eq(obj.sum_varargs_default_prefix(1), 1)
+	assert_eq(obj.sum_varargs_default_prefix(1, 2), 3)
+	assert_eq(obj.sum_varargs_default_prefix(1, 2, 3), 6)
+
+	# Two default values: provided arguments fill from the left.
+	assert_eq(obj.sum_varargs_default_two(), 30)
+	assert_eq(obj.sum_varargs_default_two(1), 21)
+	assert_eq(obj.sum_varargs_default_two(1, 2), 3)
+	assert_eq(obj.sum_varargs_default_two(1, 2, 3), 6)
+
 	# Methods should have the vararg flag.
 	var vararg_methods = {
 		"collect_varargs": false,
@@ -53,6 +65,8 @@ func test_func_varargs():
 		"sum_varargs1": false,
 		"static_sum_varargs0": false,
 		"static_sum_varargs1": false,
+		"sum_varargs_default_prefix": false,
+		"sum_varargs_default_two": false,
 	}
 	for method in obj.get_method_list():
 		if method.name in vararg_methods:
@@ -63,7 +77,7 @@ func test_func_varargs():
 
 func test_to_string():
 	var ffi = VirtualMethodTest.new()
-	
+
 	assert_eq(str(ffi), "VirtualMethodTest[integer=0]")
 
 func test_var_accessors():
@@ -515,7 +529,7 @@ func update_self_reference(value):
 #	# Create the gd_self_obj and connect its signal to a gdscript method that calls back into it.
 #	gd_self_obj = GdSelfObj.new()
 #	gd_self_obj.update_internal_signal.connect(update_self_reference)
-#	
+#
 #	# The returned value will still be 0 because update_internal can't be called in update_self_reference due to a borrowing issue.
 #	assert_eq(gd_self_obj.fail_to_update_internal_value_due_to_conflicting_borrow(10), 0)
 
@@ -573,11 +587,11 @@ func test_renamed_func_shape():
 	var node_props = base_node.get_property_list().map(func(p): return p.name)
 	var node_methods = base_node.get_method_list().map(func(m): return m.name)
 	base_node.free()
-	
+
 	# Get our object's properties and methods
 	var obj_props = obj.get_property_list().map(func(p): return p.name)
 	var obj_methods = obj.get_method_list().map(func(m): return m.name)
-	
+
 	# Get only the new properties and methods (not in Node)
 	var gdext_props = obj_props.filter(func(name): return not node_props.has(name))
 	var gdext_methods = obj_methods.filter(func(name): return not node_methods.has(name))
@@ -585,7 +599,7 @@ func test_renamed_func_shape():
 	# Assert counts
 	assert_eq(gdext_props.size(), 2, "number of properties should be 2")
 	assert_eq(gdext_methods.size(), 2, "number of methods should be 2")
-	
+
 	# Assert specific names
 	assert(gdext_props.has("int_val"), "should have a property named 'int_val'")
 	# Godot automatically adds a property of the class name (acts as the top-level category in the inspector UI).
@@ -605,12 +619,12 @@ func test_renamed_func_get_set():
 	assert_eq(obj.f1(), 0)
 
 	obj.int_val = 42;
-	
+
 	assert_eq(obj.int_val, 42)
 	assert_eq(obj.f1(), 42)
 
 	obj.f2(84)
-	
+
 	assert_eq(obj.int_val, 84)
 	assert_eq(obj.f1(), 84)
 

@@ -325,13 +325,16 @@ fn process_godot_fns(
                 )?;
 
                 // Default value expressions from `#[opt(default = EXPR)]`; None for required parameters.
-                let all_param_maybe_defaults = parse_default_expressions(&mut function.params)?;
+                let mut all_param_maybe_defaults = parse_default_expressions(&mut function.params)?;
 
                 if let Some(varargs_ident) = signature_info.varargs_ident.as_ref() {
-                    if all_param_maybe_defaults.iter().any(Option::is_some) {
+                    // The last element belongs to `Varargs`. Remove it,
+                    // so that the remaining entries line up with `param_idents` (which excludes `Varargs`).
+                    let last = all_param_maybe_defaults.pop();
+                    if last.flatten().is_some() {
                         return bail!(
                             varargs_ident,
-                            "a `Varargs` parameter cannot be combined with `#[opt]` default parameters",
+                            "a `Varargs` parameter cannot have a default value",
                         );
                     }
 

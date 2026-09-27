@@ -49,7 +49,7 @@ pub trait InParamTuple: ParamTuple {
     ///
     /// - `args_ptr` must be a pointer to an array of length `arg_count`
     /// - Each element of `args_ptr` must be reborrowable as a `&Variant` with a lifetime that lasts for the duration of the call.
-    /// - `arg_count + default_values.len()` must equal `Self::LEN`
+    /// - `arg_count` and `default_values.len()` must not exceed `Self::LEN`, and their sum must be at least `Self::LEN`.
     #[doc(hidden)]
     unsafe fn from_varcall_args(
         args_ptr: *const sys::GDExtensionConstVariantPtr,

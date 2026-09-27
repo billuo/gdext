@@ -331,7 +331,8 @@ pub struct MethodUserdata<Params, Ret> {
 /// Everything the FFI callbacks need to invoke one vararg `#[func]`, passed to Godot as its `method_userdata`.
 ///
 /// Like [`MethodUserdata`], but the forwarding function additionally receives the trailing arguments as a raw pointer/length pair, so they
-/// can be borrowed without allocation. Vararg methods have no default arguments (they are rejected at macro expansion) and no ptrcall path.
+/// can be borrowed without allocation. Default arguments apply to the declared parameters only, never to the trailing arguments.
+/// Vararg methods have no ptrcall path.
 #[repr(C)]
 pub struct VarargMethodUserdata<Params, Ret> {
     header: MethodHeader,
@@ -410,7 +411,8 @@ impl<Params: InParamTuple, Ret: EngineToGodot> MethodUserdata<Params, Ret> {
 
 impl<Params, Ret> VarargMethodUserdata<Params, Ret> {
     /// # Safety
-    /// `func` must treat its instance pointer as an instance of the class the method is registered for.
+    /// `func` must treat its instance pointer as an instance of the class the method is registered for,
+    /// and reconstruct a `Varargs` from the trailing raw pointer/length pair.
     pub unsafe fn new(
         class_name: &'static str,
         method_name: &'static str,
@@ -420,12 +422,13 @@ impl<Params, Ret> VarargMethodUserdata<Params, Ret> {
             *const sys::GDExtensionConstVariantPtr,
             usize,
         ) -> Ret,
+        default_arguments: Vec<Variant>,
     ) -> Self {
         Self {
             header: MethodHeader {
                 class_name,
                 method_name,
-                default_arguments: MethodDefaults(vec![]),
+                default_arguments: MethodDefaults(default_arguments),
             },
             func,
         }
@@ -573,6 +576,7 @@ unsafe extern "C" fn varcall_varargs_callback<Params: InParamTuple, Ret: EngineT
                 &call_ctx,
                 args_ptr,
                 arg_count,
+                &data.header.default_arguments,
                 ret,
                 err,
                 data.func,

@@ -978,7 +978,23 @@ pub fn derive_godot_class(input: TokenStream) -> TokenStream {
 /// obj.sum(10, 1, 2, 3) # returns 16
 /// ```
 ///
-/// `Varargs` cannot be combined with `#[opt]` or `#[func(virtual)]`.
+/// Parameters before `Varargs` may be optional (using `#[opt]`), as in GDScript's `func f(a = 1, ...args)`.
+///
+/// A `Varargs` parameter itself cannot have a default value:
+/// ```compile_fail
+/// # use godot::prelude::*;
+/// # #[derive(GodotClass)]
+/// # #[class(init)]
+/// # struct MyStruct {}
+/// #
+/// # #[godot_api]
+/// # impl MyStruct {
+/// #[func]
+/// fn sum(&self, #[opt(default = 5)] args: Varargs) {}
+/// # }
+/// ```
+///
+/// `Varargs` cannot be combined with `#[func(virtual)]`.
 ///
 /// A function can declare at most one `Varargs` parameter:
 /// ```compile_fail

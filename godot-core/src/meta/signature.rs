@@ -119,11 +119,13 @@ where
 
     /// Receive a varcall from Godot, where the method additionally collects trailing varargs.
     ///
-    /// The trailing arguments are passed to `func` as a raw pointer/length pair (see `Varargs::from_raw_parts()`), so that the varargs
-    /// can be borrowed without allocation. `func` is responsible for reconstructing a `Varargs` from them.
+    /// Declared parameters that the caller omitted are filled from `default_values`, as for regular varcalls. The trailing arguments are
+    /// passed to `func` as a raw pointer/length pair (see `Varargs::from_raw_parts()`), so that the varargs can be borrowed without
+    /// allocation. `func` is responsible for reconstructing a `Varargs` from them.
     ///
     /// # Safety
-    /// A call to this function must be caused by Godot making a varcall with at least `Params::LEN` arguments and return type `Ret`.
+    /// A call to this function must be caused by Godot making a varcall with at least `Params::LEN - default_values.len()` arguments and
+    /// return type `Ret`.
     #[inline]
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn in_varcall_varargs(
@@ -131,6 +133,7 @@ where
         call_ctx: &CallContext,
         args_ptr: *const sys::GDExtensionConstVariantPtr,
         arg_count: i64,
+        default_values: &[Variant],
         ret: sys::GDExtensionVariantPtr,
         err: *mut sys::GDExtensionCallError,
         func: unsafe fn(
@@ -141,23 +144,26 @@ where
         ) -> Ret,
     ) -> CallResult<()> {
         let arg_count = arg_count as usize;
-        CallError::check_vararg_arg_count(call_ctx, arg_count, Params::LEN)?;
+        CallError::check_vararg_arg_count(call_ctx, arg_count, default_values.len(), Params::LEN)?;
 
         #[cfg(feature = "itest")]
         trace::push(true, false, call_ctx);
 
-        // Convert the first `Params::LEN` arguments (vararg methods have no default values).
-        // SAFETY: `args_ptr` holds at least `Params::LEN` valid variant pointers, checked above.
-        let args = unsafe { Params::from_varcall_args(args_ptr, Params::LEN, &[], call_ctx)? };
+        // Arguments fill the declared parameters from the left; missing ones are merged with their default values.
+        // SAFETY: `args_ptr` holds at least `Params::LEN - default_values.len()` valid variant pointers, checked above.
+        let explicit_count = arg_count.min(Params::LEN);
+        let args = unsafe {
+            Params::from_varcall_args(args_ptr, explicit_count, default_values, call_ctx)?
+        };
 
-        // Pass the remaining arguments through as a raw pointer/length pair, without collecting them.
-        // SAFETY: `args_ptr` holds `arg_count` valid variant pointers, and `Params::LEN <= arg_count`.
+        // Arguments beyond the declared parameters are never defaulted; pass them through as a raw pointer/length pair.
+        // SAFETY: `args_ptr` holds `arg_count` valid variant pointers, and `explicit_count <= arg_count`.
         let rust_result = unsafe {
             func(
                 instance_ptr,
                 args,
-                args_ptr.add(Params::LEN),
-                arg_count - Params::LEN,
+                args_ptr.add(explicit_count),
+                arg_count - explicit_count,
             )
         };
 

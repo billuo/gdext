@@ -187,6 +187,7 @@ pub fn make_method_registration(
                         #class_name_str,
                         #method_name_str,
                         #forwarding_closure,
+                        #default_parameters,
                     )
                 },
                 quote! { method::ClassMethodInfo::from_vararg_signature::<CallParams, CallRet> },

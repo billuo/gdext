@@ -122,6 +122,26 @@ impl FuncObj {
         }
         sum
     }
+
+    // Default values on parameters before `Varargs` are allowed; they fill the declared parameters, never the trailing arguments.
+    #[func]
+    fn sum_varargs_default_prefix(&self, #[opt(default = 100)] prefix: i64, args: Varargs) -> i64 {
+        self.sum_varargs1(prefix, args)
+    }
+
+    #[func]
+    fn sum_varargs_default_two(
+        &self,
+        #[opt(default = 10)] prefix: i64,
+        #[opt(default = 20)] offset: i64,
+        args: Varargs,
+    ) -> i64 {
+        let mut sum = prefix + offset;
+        for arg in args.iter() {
+            sum += arg.to::<i64>();
+        }
+        sum
+    }
 }
 
 impl FuncObj {
@@ -475,6 +495,40 @@ fn func_varargs() {
     assert!(empty.is_empty());
     let sum_none = obj.call("sum_varargs0", vslice![]).to::<i64>();
     assert_eq!(sum_none, 0);
+}
+
+#[itest]
+fn func_varargs_with_defaults() {
+    let mut obj = FuncObj::new_gd();
+
+    // No arguments: the default fills `prefix`, the varargs stay empty.
+    let sum = obj
+        .call("sum_varargs_default_prefix", vslice![])
+        .to::<i64>();
+    assert_eq!(sum, 100);
+
+    // One argument fills `prefix`; it is not consumed as a vararg.
+    let sum = obj
+        .call("sum_varargs_default_prefix", vslice![1])
+        .to::<i64>();
+    assert_eq!(sum, 1);
+
+    // Arguments beyond the declared parameters are varargs.
+    let sum = obj
+        .call("sum_varargs_default_prefix", vslice![1, 2])
+        .to::<i64>();
+    assert_eq!(sum, 3);
+    let sum = obj
+        .call("sum_varargs_default_prefix", vslice![1, 2, 3])
+        .to::<i64>();
+    assert_eq!(sum, 6);
+
+    // Two optional parameters: provided arguments fill from the left, the rest use their own defaults.
+    let mut call = |args: &[Variant]| obj.call("sum_varargs_default_two", args).to::<i64>();
+    assert_eq!(call(&[]), 30);
+    assert_eq!(call(vslice![1]), 21);
+    assert_eq!(call(vslice![1, 2]), 3);
+    assert_eq!(call(vslice![1, 2, 4]), 7);
 }
 
 #[itest]
