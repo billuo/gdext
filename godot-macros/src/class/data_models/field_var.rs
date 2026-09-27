@@ -455,10 +455,14 @@ impl GetterSetterImpl {
         );
 
         let signature = util::parse_signature(signature);
+        let signature_info = match into_signature_info(signature, class_name, false) {
+            Ok(info) => info,
+            Err(err) => return (funcs_collection_constant, err.to_compile_error()),
+        };
         let export_token = make_method_registration(
             class_name,
             FuncDefinition {
-                signature_info: into_signature_info(signature, class_name, false),
+                signature_info,
                 // Since we're analyzing a struct's field, we don't have access to the corresponding get/set function's external (non-#[func])
                 // attributes. We have to assume the function exists and has the name the user gave us, with the expected signature.
                 // Ideally, we'd be able to place #[cfg_attr] on #[var(get)] and #[var(set)] to be able to match a #[cfg()] (for instance)

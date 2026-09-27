@@ -89,6 +89,39 @@ impl FuncObj {
         required
     }
     */
+
+    #[func]
+    fn collect_varargs(&self, args: Varargs) -> VarArray {
+        args.to_var_array()
+    }
+
+    #[func]
+    fn sum_varargs0(&self, args: Varargs) -> i64 {
+        self.sum_varargs1(0, args)
+    }
+
+    #[func]
+    fn sum_varargs1(&self, prefix: i64, args: Varargs) -> i64 {
+        let mut sum = prefix;
+        for arg in args.iter() {
+            sum += arg.to::<i64>();
+        }
+        sum
+    }
+
+    #[func]
+    fn static_sum_varargs0(args: Varargs) -> i64 {
+        Self::static_sum_varargs1(0, args)
+    }
+
+    #[func]
+    fn static_sum_varargs1(prefix: i64, args: Varargs) -> i64 {
+        let mut sum = prefix;
+        for arg in args.iter() {
+            sum += arg.to::<i64>();
+        }
+        sum
+    }
 }
 
 impl FuncObj {
@@ -415,6 +448,33 @@ fn func_immutable_defaults() {
         arr.is_read_only(),
         "GodotImmutable trait did its job to make array read-only"
     );
+}
+
+#[itest]
+fn func_varargs() {
+    let mut obj = FuncObj::new_gd();
+
+    // Typed parameter followed by varargs.
+    let sum = obj.call("sum_varargs1", vslice![1, 2, 3, 4]).to::<i64>();
+    assert_eq!(sum, 10);
+
+    // Only the typed parameter, no varargs.
+    let sum_no_varargs = obj.call("sum_varargs1", vslice![5]).to::<i64>();
+    assert_eq!(sum_no_varargs, 5);
+
+    // Pure vararg method, called with arguments.
+    let arr = obj
+        .call("collect_varargs", vslice![1, "two", 3.5])
+        .to::<VarArray>();
+    assert_eq!(arr, varray![1, "two", 3.5]);
+    let sum = obj.call("sum_varargs0", vslice![1, 2, 3, 4]).to::<i64>();
+    assert_eq!(sum, 10);
+
+    // Pure vararg method, called without arguments.
+    let empty = obj.call("collect_varargs", &[]).to::<VarArray>();
+    assert!(empty.is_empty());
+    let sum_none = obj.call("sum_varargs0", vslice![]).to::<i64>();
+    assert_eq!(sum_none, 0);
 }
 
 #[itest]

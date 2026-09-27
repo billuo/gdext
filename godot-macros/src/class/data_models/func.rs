@@ -119,10 +119,12 @@ pub fn make_method_registration(
     let sig_ret = &signature_info.return_type;
 
     let is_script_virtual = func_definition.is_script_virtual;
-    let method_flags = match make_method_flags(signature_info.receiver_type, is_script_virtual) {
-        Ok(mf) => mf,
-        Err(msg) => return bail_fn(msg, &signature_info.method_name),
-    };
+    let has_varargs = signature_info.varargs_ident.is_some();
+    let method_flags =
+        match make_method_flags(signature_info.receiver_type, is_script_virtual, has_varargs) {
+            Ok(mf) => mf,
+            Err(msg) => return bail_fn(msg, &signature_info.method_name),
+        };
 
     let forwarding_closure = make_forwarding_closure(
         &class_name,
@@ -178,21 +180,42 @@ pub fn make_method_registration(
             )
         }
     } else {
+        let (userdata_expr, info_constructor) = if has_varargs {
+            (
+                quote! {
+                    method::VarargMethodUserdata::<CallParams, CallRet>::new(
+                        #class_name_str,
+                        #method_name_str,
+                        #forwarding_closure,
+                    )
+                },
+                quote! { method::ClassMethodInfo::from_vararg_signature::<CallParams, CallRet> },
+            )
+        } else {
+            (
+                quote! {
+                    method::MethodUserdata::<CallParams, CallRet>::new(
+                        #class_name_str,
+                        #method_name_str,
+                        #forwarding_closure,
+                        #default_parameters,
+                    )
+                },
+                quote! { method::ClassMethodInfo::from_signature::<CallParams, CallRet> },
+            )
+        };
+
         quote! {
             // The varcall and ptrcall callbacks live in godot-core, shared by all #[func]s with this signature; everything method-specific
-            // is passed to Godot as method userdata. See `varcall_callback()` for how Godot picks between the two conventions.
+            // is passed to Godot as method userdata. Vararg methods register only the varcall callback -- variable-length arguments
+            // does not support ptrcall. See `varcall_callback()` for how Godot picks between the two conventions.
             //
             // SAFETY: the forwarding closure interprets its instance pointer as an instance of #class_name, matching the class the method
             // is registered for -- #method_flags matches its receiver.
             unsafe {
-                let method_data = method::MethodUserdata::<CallParams, CallRet>::new(
-                    #class_name_str,
-                    #method_name_str,
-                    #forwarding_closure,
-                    #default_parameters,
-                );
+                let method_data = #userdata_expr;
 
-                method::ClassMethodInfo::from_signature::<CallParams, CallRet>(
+                #info_constructor(
                     __godot_class_id,
                     method_name,
                     #method_flags,
@@ -296,6 +319,9 @@ pub struct SignatureInfo {
 
     /// Default value expressions `EXPR` from `#[opt(default = EXPR)]`, for all optional parameters.
     pub optional_param_default_exprs: Vec<TokenStream>,
+
+    /// Name of the `Varargs` parameter, if the function declares one. Always the last parameter.
+    pub varargs_ident: Option<Ident>,
 }
 
 impl SignatureInfo {
@@ -309,6 +335,7 @@ impl SignatureInfo {
             return_type: quote! { () },
             modified_param_types: vec![],
             optional_param_default_exprs: vec![],
+            varargs_ident: None,
         }
     }
 
@@ -347,6 +374,24 @@ fn make_forwarding_closure(
     let params = &signature_info.param_idents;
     let params_tuple = signature_info.params_tuple();
     let param_ident = Ident::new("params", signature_info.params_span);
+    let varargs_ident = &signature_info.varargs_ident;
+
+    // Arguments forwarded to the Rust method: the typed parameters, plus the vararg parameter (if any).
+    let forward_args = quote! { #(#params,)* #varargs_ident };
+
+    let (closure_params, varargs_decl) = match varargs_ident {
+        Some(va) => {
+            let varargs_ptr = Ident::new("__varargs_ptr", signature_info.params_span);
+            let varargs_len = Ident::new("__varargs_len", signature_info.params_span);
+            (
+                quote! { #param_ident, #varargs_ptr, #varargs_len },
+                quote! {
+                    let #va = unsafe { ::godot::builtin::Varargs::from_raw_parts(#varargs_ptr, #varargs_len) };
+                },
+            )
+        }
+        None => (quote! { #param_ident }, quote! {}),
+    };
 
     let instance_decl = match &signature_info.receiver_type {
         ReceiverType::Ref => quote! {
@@ -396,7 +441,7 @@ fn make_forwarding_closure(
                 // Use fresh spans for generated code (class_name, interface_trait), but keep method_name's original span for proper
                 // IDE navigation to user's function.
                 method_call = quote! {
-                    <#class_name as #interface_trait>::#method_name( #instance_ref, #(#params),* )
+                    <#class_name as #interface_trait>::#method_name( #instance_ref, #forward_args )
                 };
             } else {
                 // impl Class {...}
@@ -404,14 +449,14 @@ fn make_forwarding_closure(
 
                 sig_tuple_annotation = TokenStream::new();
                 method_call = quote! {
-                    __gdext_self.#method_name( #(#params),* )
+                    __gdext_self.#method_name( #forward_args )
                 };
             };
 
             quote! {
                 // Identifiers need to share the span to avoid proc macro hygiene issues
                 // similar to https://github.com/godot-rust/gdext/pull/1397.
-                |instance_ptr, #param_ident| {
+                |instance_ptr, #closure_params| {
                     let #params_tuple #sig_tuple_annotation = #param_ident;
 
                     let storage =
@@ -419,6 +464,7 @@ fn make_forwarding_closure(
 
                     #instance_decl
                     #before_method_call
+                    #varargs_decl
                     #method_call
                 }
             }
@@ -436,7 +482,7 @@ fn make_forwarding_closure(
             quote! {
                 // Identifiers need to share the span to avoid proc macro hygiene issues
                 // similar to https://github.com/godot-rust/gdext/pull/1397.
-                |instance_ptr, #param_ident| {
+                |instance_ptr, #closure_params| {
                     // Not using `virtual_sig`, since virtual methods with `#[func(gd_self)]` are being moved out of the trait to inherent impl.
                     let #params_tuple #sig_tuple_annotation = #param_ident;
 
@@ -444,7 +490,8 @@ fn make_forwarding_closure(
                         unsafe { ::godot::private::as_storage::<#class_name>(instance_ptr) };
 
                     #before_method_call
-                    #class_name::#method_name(::godot::private::Storage::get_gd(&*storage), #(#params),*)
+                    #varargs_decl
+                    #class_name::#method_name(::godot::private::Storage::get_gd(&*storage), #forward_args)
                 }
             }
         }
@@ -454,9 +501,10 @@ fn make_forwarding_closure(
             // Identifiers need to share the span to avoid proc macro hygiene issues
             // similar to https://github.com/godot-rust/gdext/pull/1397.
             quote! {
-                |_, #param_ident| {
+                |_, #closure_params| {
                     let #params_tuple = #param_ident;
-                    #class_name::#method_name(#(#params),*)
+                    #varargs_decl
+                    #class_name::#method_name(#forward_args)
                 }
             }
         }
@@ -490,7 +538,7 @@ pub(crate) fn into_signature_info(
     signature: venial::Function,
     class_name: &Ident,
     has_gd_self: bool,
-) -> SignatureInfo {
+) -> ParseResult<SignatureInfo> {
     let method_name = signature.name.clone();
     let mut receiver_type = if has_gd_self {
         ReceiverType::GdSelf
@@ -509,6 +557,8 @@ pub(crate) fn into_signature_info(
 
     let mut next_unnamed_index = 0;
     let mut modified_param_types = vec![];
+    let mut varargs_ident = None;
+    let mut varargs_position = None;
     for (index, (arg, _)) in signature.params.inner.into_iter().enumerate() {
         match arg {
             venial::FnParam::Receiver(recv) => {
@@ -523,6 +573,23 @@ pub(crate) fn into_signature_info(
                 };
             }
             venial::FnParam::Typed(arg) => {
+                if arg
+                    .ty
+                    .tokens
+                    .last()
+                    .is_some_and(|tt| tt.to_string() == "Varargs")
+                {
+                    if varargs_ident.is_some() {
+                        return bail!(
+                            &arg.name,
+                            "a function can have at most one `Varargs` parameter",
+                        );
+                    }
+                    varargs_ident = Some(maybe_rename_parameter(arg.name, &mut next_unnamed_index));
+                    varargs_position = Some(index);
+                    continue;
+                }
+
                 // The first parameter - Receiver - should be removed.
                 let index = if receiver_type == ReceiverType::GdSelf {
                     index + 1
@@ -549,7 +616,17 @@ pub(crate) fn into_signature_info(
         }
     }
 
-    SignatureInfo {
+    // The vararg parameter must be the last one.
+    if let Some(position) = &varargs_position
+        && *position != num_params - 1
+    {
+        return bail!(
+            varargs_ident.unwrap(),
+            "the `Varargs` parameter must be the last parameter of the function",
+        );
+    }
+
+    Ok(SignatureInfo {
         method_name,
         receiver_type,
         params_span,
@@ -558,7 +635,8 @@ pub(crate) fn into_signature_info(
         return_type,
         modified_param_types,
         optional_param_default_exprs: vec![], // Assigned outside, if relevant.
-    }
+        varargs_ident,
+    })
 }
 
 /// If `f32` is used for a delta parameter in a virtual process function, transparently use `f64` behind the scenes.
@@ -607,6 +685,7 @@ pub(crate) fn maybe_rename_parameter(param_ident: Ident, next_unnamed_index: &mu
 fn make_method_flags(
     method_type: ReceiverType,
     is_script_virtual: bool,
+    has_varargs: bool,
 ) -> Result<TokenStream, String> {
     let flags = quote! { ::godot::register::info::MethodFlags };
 
@@ -628,13 +707,17 @@ fn make_method_flags(
         }
     };
 
-    let flags = if is_script_virtual {
+    let mut result = if is_script_virtual {
         quote! { #base_flags | #flags::VIRTUAL }
     } else {
         base_flags
     };
 
-    Ok(flags)
+    if has_varargs {
+        result = quote! { #result | #flags::VARARG };
+    }
+
+    Ok(result)
 }
 
 /// Generate code for a `ptrcall` call expression.

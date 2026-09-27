@@ -950,6 +950,50 @@ pub fn derive_godot_class(input: TokenStream) -> TokenStream {
 /// - Default expressions are evaluated on each function call (not cached). **This may change**, see
 ///   [PR #1396](https://github.com/godot-rust/gdext/pull/1396).
 ///
+/// ## Vararg functions
+/// A function whose last parameter is of type [`Varargs`] accepts any number of additional arguments. Arguments beyond the declared (typed)
+/// parameters are collected into the `Varargs` value, which borrows them for the duration of the call.
+///
+/// [`Varargs`]: ../builtin/struct.Varargs.html
+///
+/// ```no_run
+/// use godot::prelude::*;
+/// # #[derive(GodotClass)]
+/// # #[class(init)]
+/// # struct MyClass;
+/// #
+/// # #[godot_api]
+/// # impl MyClass {
+/// #[func]
+/// fn sum(&self, prefix: i64, args: Varargs) -> i64 {
+///     prefix + args.iter().map(|v| v.to::<i64>()).sum::<i64>()
+/// }
+/// # }
+/// ```
+/// From GDScript, such a method can be called with any number of arguments (at least one):
+/// ```gdscript
+/// obj.sum(10)          # returns 10
+/// obj.sum(10, 1)       # returns 11
+/// obj.sum(10, 1, 2)    # returns 13
+/// obj.sum(10, 1, 2, 3) # returns 16
+/// ```
+///
+/// `Varargs` cannot be combined with `#[opt]` or `#[func(virtual)]`.
+///
+/// A function can declare at most one `Varargs` parameter:
+/// ```compile_fail
+/// # use godot::prelude::*;
+/// # #[derive(GodotClass)]
+/// # #[class(init)]
+/// # struct MyStruct {}
+/// #
+/// # #[godot_api]
+/// # impl MyStruct {
+/// #[func]
+/// fn sum(&self, first: Varargs, second: Varargs) {}
+/// # }
+/// ```
+///
 /// ## Method renaming
 /// If you want the method to have a different name in Godot and Rust, you can use `#[func(rename = ...)]`:
 ///

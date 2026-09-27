@@ -23,6 +23,44 @@ func test_init_defaults():
 	assert_eq(obj.literal_int, 42)
 	assert_eq(obj.expr_int, -42)
 
+func test_func_varargs():
+	var obj = FuncObj.new()
+
+	# GDScript statically recognizes the vararg method, so any number of trailing arguments is allowed.
+	assert_eq(obj.sum_varargs0(1, 2, 3, 4), 10)
+	assert_eq(obj.sum_varargs1(1, 2, 3, 4), 10)
+	assert_eq(obj.sum_varargs0(5), 5)
+	assert_eq(obj.sum_varargs1(5), 5)
+
+	# Heterogeneous varargs.
+	var collected: Array = obj.collect_varargs(1, "two", 3.5)
+	assert_eq(collected, [1, "two", 3.5])
+
+	# Zero varargs.
+	assert_eq(obj.collect_varargs(), [])
+	assert_eq(obj.sum_varargs0(), 0)
+
+	# Static vararg method.
+	assert_eq(FuncObj.static_sum_varargs0(10, 1, 2), 13)
+	assert_eq(FuncObj.static_sum_varargs1(10, 1, 2), 13)
+	assert_eq(FuncObj.static_sum_varargs0(10), 10)
+	assert_eq(FuncObj.static_sum_varargs1(10), 10)
+
+	# Methods should have the vararg flag.
+	var vararg_methods = {
+		"collect_varargs": false,
+		"sum_varargs0": false,
+		"sum_varargs1": false,
+		"static_sum_varargs0": false,
+		"static_sum_varargs1": false,
+	}
+	for method in obj.get_method_list():
+		if method.name in vararg_methods:
+			vararg_methods[method.name] = true
+			assert_that(method.flags & METHOD_FLAG_VARARG, method.name + " should be registered as a vararg method")
+	for method in vararg_methods:
+		assert_that(vararg_methods[method], method + " should be present in get_method_list()")
+
 func test_to_string():
 	var ffi = VirtualMethodTest.new()
 	
